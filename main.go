@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -8,10 +9,24 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"time"
+
+	"github.com/SnakeyNinjaGOAT/chirpy/internal/database"
+	"github.com/google/uuid"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
+
+type User struct {
+	Id        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
+}
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	db             *database.Queries
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -23,9 +38,26 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 }
 
 func main() {
+	err := godotenv.Load()
+	if err != nil {
+		fmt.Println(err)
+	}
+	dbUrl := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbUrl)
+
+	dbQueries := database.New(db)
+
+	if err != nil {
+		fmt.Println(err)
+	}
 	mux := http.NewServeMux()
 
 	apiCfg := apiConfig{}
+	apiCfg.db = dbQueries
+
+	if err != nil {
+		log.Printf("Error connecting to database: %s", err)
+	}
 
 	setUpEndPoints(mux, &apiCfg)
 
@@ -34,7 +66,7 @@ func main() {
 		Addr:    ":8080",
 	}
 
-	err := server.ListenAndServe()
+	err = server.ListenAndServe()
 
 	if err != nil {
 		fmt.Println(err)
@@ -46,8 +78,43 @@ func setUpEndPoints(mux *http.ServeMux, apiCfg *apiConfig) {
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(handleFileServer()))
 	mux.HandleFunc("GET /api/healthz", handleReadyPath)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerTotalRequests)
-	mux.HandleFunc("POST /admin/reset", apiCfg.handleMetricReset)
+	mux.HandleFunc("POST /admin/reset", apiCfg.handleReset)
 	mux.HandleFunc("POST /api/validate_chirp", handleValidateChirp)
+	mux.HandleFunc("POST /api/users", apiCfg.handlePostUsers)
+
+}
+
+func (cfg *apiConfig) handlePostUsers(writer http.ResponseWriter, request *http.Request) {
+	type parameters struct {
+		Email string `json:"email"`
+	}
+
+	decode := json.NewDecoder(request.Body)
+	var params parameters
+	err := decode.Decode(&params)
+
+	if err != nil {
+		errMsg := fmt.Sprintf("Error decoding body: %s", err)
+		respondWithError(writer, 500, errMsg)
+		return
+	}
+
+	user, err := cfg.db.CreateUser(request.Context(), params.Email)
+
+	if err != nil {
+		errMsg := fmt.Sprintf("Error creating user: %s", err)
+		respondWithError(writer, 500, errMsg)
+		return
+	}
+
+	data := User{
+		Id:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+	}
+
+	respondWithJSON(writer, 201, data)
 
 }
 
@@ -136,7 +203,25 @@ func respondWithJSON(writer http.ResponseWriter, code int, payload interface{}) 
 	writer.Write(data)
 }
 
-func (cfg *apiConfig) handleMetricReset(writer http.ResponseWriter, request *http.Request) {
+func (cfg *apiConfig) handleReset(writer http.ResponseWriter, request *http.Request) {
+
+	platform := os.Getenv("PLATFORM")
+
+	if platform != "dev" {
+		errMsg := "Forbidden"
+		respondWithError(writer, 403, errMsg)
+		return
+	}
+
+	err := cfg.db.DeleteAllUsers(request.Context())
+
+	if err != nil {
+		errMsg := fmt.Sprintf("Error deleting from users table: %s", err)
+		respondWithError(writer, 500, errMsg)
+		return
+	}
+
+	// Reset metrics
 	oldHits := cfg.fileserverHits.Swap(0)
 	msg := fmt.Sprintf("Metrics Reset\nPrevious hits: %v", oldHits)
 	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
