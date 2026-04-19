@@ -24,6 +24,14 @@ type User struct {
 	Email     string    `json:"email"`
 }
 
+type Chirp struct {
+	Id        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Body      string    `json:"body"`
+	UserId    uuid.UUID `json:"user_id"`
+}
+
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	db             *database.Queries
@@ -79,8 +87,65 @@ func setUpEndPoints(mux *http.ServeMux, apiCfg *apiConfig) {
 	mux.HandleFunc("GET /api/healthz", handleReadyPath)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerTotalRequests)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handleReset)
-	mux.HandleFunc("POST /api/validate_chirp", handleValidateChirp)
+	//mux.HandleFunc("POST /api/validate_chirp", handleValidateChirp)
 	mux.HandleFunc("POST /api/users", apiCfg.handlePostUsers)
+	mux.HandleFunc("POST /api/chirps", apiCfg.handlePostChirp)
+
+}
+
+func (cfg *apiConfig) handlePostChirp(writer http.ResponseWriter, request *http.Request) {
+	type chirpRequest struct {
+		Body   string    `json:"body"`
+		UserId uuid.UUID `json:"user_id"`
+	}
+
+	decoder := json.NewDecoder(request.Body)
+	var chirp chirpRequest
+	err := decoder.Decode(&chirp)
+
+	if err != nil {
+		errMsg := fmt.Sprintf("Error decoding chirp: %s", err)
+		respondWithError(writer, 500, errMsg)
+		return
+	}
+
+	validLength, finalBody, chirpLength := validateChirp(chirp.Body)
+
+	if !validLength {
+		errMsg := fmt.Sprintf("Chirp exceeds maximium length of (140) with %d characters", chirpLength)
+		respondWithError(writer, 400, errMsg)
+		return
+	}
+
+	_, err = cfg.db.GetUser(request.Context(), chirp.UserId)
+
+	if err != nil {
+		errMsg := fmt.Sprintf("User does not exist: %s", err)
+		respondWithError(writer, 400, errMsg)
+		return
+	}
+
+	chirpParams := database.CreateChirpParams{
+		Body:   finalBody,
+		UserID: chirp.UserId,
+	}
+	createdChirp, err := cfg.db.CreateChirp(request.Context(), chirpParams)
+
+	if err != nil {
+		errMsg := fmt.Sprintf("Couldn't create chirp: %s", err)
+		respondWithError(writer, 500, errMsg)
+		return
+	}
+
+	returnChirp := Chirp{
+		Id:        createdChirp.ID,
+		CreatedAt: createdChirp.CreatedAt,
+		UpdatedAt: createdChirp.UpdatedAt,
+		Body:      createdChirp.Body,
+		UserId:    chirp.UserId,
+	}
+
+	respondWithJSON(writer, 201, returnChirp)
 
 }
 
@@ -116,6 +181,16 @@ func (cfg *apiConfig) handlePostUsers(writer http.ResponseWriter, request *http.
 
 	respondWithJSON(writer, 201, data)
 
+}
+
+func validateChirp(chirp string) (bool, string, int) {
+	chirpLen := len(chirp)
+	if chirpLen > 140 {
+		return false, chirp, chirpLen
+	}
+
+	finalString, _ := removeProfanity(chirp)
+	return true, finalString, chirpLen
 }
 
 func handleValidateChirp(writer http.ResponseWriter, request *http.Request) {
