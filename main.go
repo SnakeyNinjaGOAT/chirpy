@@ -87,10 +87,61 @@ func setUpEndPoints(mux *http.ServeMux, apiCfg *apiConfig) {
 	mux.HandleFunc("GET /api/healthz", handleReadyPath)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerTotalRequests)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handleReset)
-	//mux.HandleFunc("POST /api/validate_chirp", handleValidateChirp)
+
+	mux.HandleFunc("GET /api/chirps", apiCfg.handleGetChirps)
+	mux.HandleFunc("GET /api/chirps/{chirpId}", apiCfg.handleGetChirp)
 	mux.HandleFunc("POST /api/users", apiCfg.handlePostUsers)
 	mux.HandleFunc("POST /api/chirps", apiCfg.handlePostChirp)
 
+}
+
+func (cfg *apiConfig) handleGetChirp(writer http.ResponseWriter, request *http.Request) {
+	chirpId, err := uuid.Parse(request.PathValue("chirpId"))
+
+	if err != nil {
+		errMsg := fmt.Sprintf("Error getting chirp: %s", err)
+		respondWithError(writer, 400, errMsg)
+		return
+	}
+
+	chirp, err := cfg.db.GetChirp(request.Context(), chirpId)
+
+	if err != nil {
+		errMsg := fmt.Sprintf("Chirp doesn't exist: %s", err)
+		respondWithError(writer, 404, errMsg)
+		return
+	}
+
+	returnChirp := convertChirp(chirp)
+
+	respondWithJSON(writer, 200, returnChirp)
+}
+
+func (cfg *apiConfig) handleGetChirps(writer http.ResponseWriter, request *http.Request) {
+
+	chirps, err := cfg.db.GetChirps(request.Context())
+	if err != nil {
+		errMsg := fmt.Sprintf("Error retrieving all chirps: %s", err)
+		respondWithError(writer, 500, errMsg)
+		return
+	}
+	chirpList := make([]Chirp, len(chirps))
+	for i, chirp := range chirps {
+		chirpList[i] = convertChirp(chirp)
+	}
+
+	respondWithJSON(writer, 200, chirpList)
+
+}
+
+func convertChirp(chirp database.Chirp) Chirp {
+	return Chirp{
+		Id:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserId:    chirp.UserID,
+	}
 }
 
 func (cfg *apiConfig) handlePostChirp(writer http.ResponseWriter, request *http.Request) {
@@ -137,13 +188,7 @@ func (cfg *apiConfig) handlePostChirp(writer http.ResponseWriter, request *http.
 		return
 	}
 
-	returnChirp := Chirp{
-		Id:        createdChirp.ID,
-		CreatedAt: createdChirp.CreatedAt,
-		UpdatedAt: createdChirp.UpdatedAt,
-		Body:      createdChirp.Body,
-		UserId:    chirp.UserId,
-	}
+	returnChirp := convertChirp(createdChirp)
 
 	respondWithJSON(writer, 201, returnChirp)
 
@@ -191,40 +236,6 @@ func validateChirp(chirp string) (bool, string, int) {
 
 	finalString, _ := removeProfanity(chirp)
 	return true, finalString, chirpLen
-}
-
-func handleValidateChirp(writer http.ResponseWriter, request *http.Request) {
-	type parameters struct {
-		Body string `json:"body"`
-	}
-	decoder := json.NewDecoder(request.Body)
-
-	params := parameters{}
-
-	err := decoder.Decode(&params)
-
-	if err != nil {
-		errMsg := fmt.Sprintf("Error decoding parameters: %s", err)
-		respondWithError(writer, 500, errMsg)
-		return
-	}
-
-	type returnVal struct {
-		CleanedBody string `json:"cleaned_body"`
-	}
-
-	if len(params.Body) > 140 {
-		respondWithError(writer, 400, "This chirp is too long (max 140 characters)")
-		return
-	}
-
-	data, _ := removeProfanity(params.Body)
-	payload := returnVal{}
-
-	payload.CleanedBody = data
-
-	respondWithJSON(writer, 200, payload)
-
 }
 
 func respondWithError(writer http.ResponseWriter, code int, msg string) {
