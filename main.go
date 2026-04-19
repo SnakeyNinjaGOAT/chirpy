@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/SnakeyNinjaGOAT/chirpy/internal/auth"
 	"github.com/SnakeyNinjaGOAT/chirpy/internal/database"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -22,6 +23,11 @@ type User struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email     string    `json:"email"`
+}
+
+type UserParams struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 type Chirp struct {
@@ -92,7 +98,56 @@ func setUpEndPoints(mux *http.ServeMux, apiCfg *apiConfig) {
 	mux.HandleFunc("GET /api/chirps/{chirpId}", apiCfg.handleGetChirp)
 	mux.HandleFunc("POST /api/users", apiCfg.handlePostUsers)
 	mux.HandleFunc("POST /api/chirps", apiCfg.handlePostChirp)
+	mux.HandleFunc("POST /api/login", apiCfg.handleLogin)
 
+}
+
+func (cfg *apiConfig) handleLogin(writer http.ResponseWriter, request *http.Request) {
+
+	decoder := json.NewDecoder(request.Body)
+	var params UserParams
+	err := decoder.Decode(&params)
+
+	if err != nil {
+		errMsg := fmt.Sprintf("Error decoding body: %s", err)
+		respondWithError(writer, 500, errMsg)
+		return
+	}
+
+	targetUser, err := cfg.db.GetUserByEmail(request.Context(), params.Email)
+
+	if err != nil {
+		errMsg := fmt.Sprintf("User does not exist: %s", err)
+		respondWithError(writer, 400, errMsg)
+		return
+	}
+
+	passwordMatch, err := auth.CheckPasswordHash(params.Password, targetUser.HashedPassword)
+
+	if err != nil {
+		errMsg := fmt.Sprintf("Could not Check and Verify password: %s", err)
+		respondWithError(writer, 500, errMsg)
+		return
+	}
+
+	if !passwordMatch {
+		errMsg := "Incorrect password"
+		respondWithError(writer, 401, errMsg)
+		return
+	}
+
+	userResponse := convertUser(targetUser)
+
+	respondWithJSON(writer, 200, userResponse)
+}
+
+func convertUser(user database.User) User {
+	return User{
+		Id:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+	}
 }
 
 func (cfg *apiConfig) handleGetChirp(writer http.ResponseWriter, request *http.Request) {
@@ -195,12 +250,9 @@ func (cfg *apiConfig) handlePostChirp(writer http.ResponseWriter, request *http.
 }
 
 func (cfg *apiConfig) handlePostUsers(writer http.ResponseWriter, request *http.Request) {
-	type parameters struct {
-		Email string `json:"email"`
-	}
 
 	decode := json.NewDecoder(request.Body)
-	var params parameters
+	var params UserParams
 	err := decode.Decode(&params)
 
 	if err != nil {
@@ -209,7 +261,19 @@ func (cfg *apiConfig) handlePostUsers(writer http.ResponseWriter, request *http.
 		return
 	}
 
-	user, err := cfg.db.CreateUser(request.Context(), params.Email)
+	hashedPassword, err := auth.HashPassword(params.Password)
+	if err != nil {
+		errMsg := fmt.Sprintf("Error hashing password: %s", err)
+		respondWithError(writer, 500, errMsg)
+		return
+	}
+
+	userParams := database.CreateUserParams{
+		Email:          params.Email,
+		HashedPassword: hashedPassword,
+	}
+
+	user, err := cfg.db.CreateUser(request.Context(), userParams)
 
 	if err != nil {
 		errMsg := fmt.Sprintf("Error creating user: %s", err)
@@ -217,12 +281,7 @@ func (cfg *apiConfig) handlePostUsers(writer http.ResponseWriter, request *http.
 		return
 	}
 
-	data := User{
-		Id:        user.ID,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email,
-	}
+	data := convertUser(user)
 
 	respondWithJSON(writer, 201, data)
 
