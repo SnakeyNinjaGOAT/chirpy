@@ -7,8 +7,19 @@ RETURNING *;
 SELECT * FROM chirps WHERE id = $1;
 
 -- name: GetChirps :many
+-- $1: string
 SELECT * FROM chirps
-ORDER BY created_at ASC;
+ORDER BY
+    CASE WHEN @sort_desc::boolean THEN created_at END DESC,
+    CASE WHEN NOT @sort_desc::boolean THEN created_at END ASC;
+
+-- name: GetChirpsByUser :many
+-- $2: string
+SELECT * FROM chirps
+WHERE user_id = $1
+ORDER BY 
+    CASE WHEN @sort_desc::boolean THEN created_at END DESC,
+    CASE WHEN NOT @sort_desc::boolean THEN created_at END ASC;
 
 
 -- name: DeleteChirp :exec

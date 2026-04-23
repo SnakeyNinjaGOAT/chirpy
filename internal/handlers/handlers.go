@@ -183,7 +183,24 @@ func HandleGetChirp(cfg *config.ApiConfig) http.HandlerFunc {
 
 func HandleGetChirps(cfg *config.ApiConfig) http.HandlerFunc {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		chirps, err := cfg.Db.GetChirps(request.Context())
+
+		authorId := request.URL.Query().Get("author_id")
+		sortParam := strings.ToUpper(request.URL.Query().Get("sort"))
+
+		sortDesc := sortParam == "DESC"
+
+		var chirps []database.Chirp
+		var err error
+
+		if authorId != "" {
+			byAutherParams := database.GetChirpsByUserParams{
+				UserID:   uuid.MustParse(authorId),
+				SortDesc: sortDesc,
+			}
+			chirps, err = cfg.Db.GetChirpsByUser(request.Context(), byAutherParams)
+		} else {
+			chirps, err = cfg.Db.GetChirps(request.Context(), sortDesc)
+		}
 		if err != nil {
 			errMsg := fmt.Sprintf("Error retrieving all chirps: %s", err)
 			utils.RespondWithError(writer, 500, errMsg)

@@ -20,12 +20,13 @@ type DBInterface interface {
 	GetUser(context.Context, uuid.UUID) (database.User, error)
 	CreateChirp(context.Context, database.CreateChirpParams) (database.Chirp, error)
 	GetChirp(context.Context, uuid.UUID) (database.Chirp, error)
-	GetChirps(context.Context) ([]database.Chirp, error)
+	GetChirps(context.Context, bool) ([]database.Chirp, error)
 	CreateRefreshToken(context.Context, database.CreateRefreshTokenParams) (database.RefreshToken, error)
 	DeleteAllUsers(context.Context) error
 	UpdateUser(context.Context, database.UpdateUserParams) (database.User, error)
 	DeleteChirp(context.Context, uuid.UUID) error
 	UpgradeUserToChirpyRed(context.Context, uuid.UUID) error
+	GetChirpsByUser(context.Context, database.GetChirpsByUserParams) ([]database.Chirp, error)
 }
 
 type ApiConfig struct {
