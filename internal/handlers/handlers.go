@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/SnakeyNinjaGOAT/chirpy/internal/auth"
@@ -351,5 +352,163 @@ func HandleTotalRequests(cfg *config.ApiConfig) http.HandlerFunc {
 		writer.WriteHeader(http.StatusOK)
 
 		writer.Write([]byte(body))
+	})
+}
+
+func HandleUpdateUser(cfg *config.ApiConfig) http.HandlerFunc {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		accessToken, err := auth.GetBearerToken(request.Header)
+		fmt.Println("Access Token: ", accessToken)
+
+		if err != nil {
+			errMsg := fmt.Sprintf("Error accessing Bearer token: %s", err)
+			utils.RespondWithError(writer, 401, errMsg)
+			return
+		}
+
+		userID, err := auth.ValidateJWT(accessToken, cfg.JwtSecret)
+
+		if err != nil {
+			errMsg := fmt.Sprintf("Error expired or invalid token: %s", err)
+			utils.RespondWithError(writer, 401, errMsg)
+			return
+		}
+
+		userParams := models.UserParams{}
+		decoder := json.NewDecoder(request.Body)
+		err = decoder.Decode(&userParams)
+
+		if err != nil {
+			errMsg := fmt.Sprintf("Error decoding body: %s", err)
+			utils.RespondWithError(writer, 400, errMsg)
+			return
+		}
+
+		newPass, err := auth.HashPassword(userParams.Password)
+
+		if err != nil {
+			errMsg := fmt.Sprintf("Error hashing password: %s", err)
+			utils.RespondWithError(writer, 500, errMsg)
+			return
+		}
+
+		updateParams := database.UpdateUserParams{
+			ID:             userID,
+			Email:          userParams.Email,
+			HashedPassword: newPass,
+		}
+
+		updatedUser, err := cfg.Db.UpdateUser(request.Context(), updateParams)
+		if err != nil {
+			errMsg := fmt.Sprintf("Error updating user: %s", err)
+			utils.RespondWithError(writer, 500, errMsg)
+			return
+		}
+
+		utils.RespondWithJSON(writer, 200, utils.ConvertUser(updatedUser))
+
+	})
+
+}
+
+func HandleDeleteChirp(cfg *config.ApiConfig) http.HandlerFunc {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+
+		accessToken, err := auth.GetBearerToken(request.Header)
+
+		if err != nil {
+			errMsg := fmt.Sprintf("Error invalid access token: %s", err)
+			utils.RespondWithError(writer, 401, errMsg)
+			return
+		}
+
+		userID, err := auth.ValidateJWT(accessToken, cfg.JwtSecret)
+
+		if err != nil {
+			errMsg := fmt.Sprintf("Error invalid access token: %s", err)
+			utils.RespondWithError(writer, 403, errMsg)
+			return
+		}
+		chirpId, err := uuid.Parse(request.PathValue("chirpId"))
+
+		if err != nil {
+			errMsg := fmt.Sprintf("Error invalid chirp: %s", err)
+			utils.RespondWithError(writer, 403, errMsg)
+			return
+		}
+
+		dbChirp, err := cfg.Db.GetChirp(request.Context(), chirpId)
+
+		if dbChirp.UserID != userID {
+			errMsg := "Forbidden"
+			utils.RespondWithError(writer, 403, errMsg)
+			return
+		}
+
+		err = cfg.Db.DeleteChirp(request.Context(), dbChirp.ID)
+		if err != nil {
+			errMsg := fmt.Sprintf("Error deleting chirp: %s", err)
+			utils.RespondWithError(writer, 500, errMsg)
+			return
+		}
+
+		writer.WriteHeader(http.StatusNoContent)
+
+	})
+}
+
+func HandleChirpyRedUpgrade(cfg *config.ApiConfig) http.HandlerFunc {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+
+		apiKey, err := auth.GetApiKeyToken(request.Header)
+
+		if err != nil {
+			utils.RespondWithError(writer, 401, err.Error())
+			return
+		}
+
+		if apiKey != cfg.PolkaKey {
+			errMsg := "Invalid ApiKey"
+			utils.RespondWithError(writer, 401, errMsg)
+			return
+		}
+
+		type data struct {
+			UserId uuid.UUID `json:"user_id"`
+		}
+
+		type upgradeToRedRequest struct {
+			Event string `json:"event"`
+			Data  data   `json:"data"`
+		}
+
+		var requestData upgradeToRedRequest
+		decoder := json.NewDecoder(request.Body)
+		err = decoder.Decode(&requestData)
+
+		if err != nil {
+			errMsg := fmt.Sprintf("Error decoding request body: %s")
+			utils.RespondWithError(writer, 400, errMsg)
+			return
+		}
+
+		event := strings.Split(requestData.Event, ".")
+		target := event[0]
+		action := event[1]
+
+		if target != "user" || action != "upgraded" || len(event) != 2 {
+			writer.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		err = cfg.Db.UpgradeUserToChirpyRed(request.Context(), requestData.Data.UserId)
+		if err != nil {
+			errMsg := fmt.Sprintf("Error user does not exist: %s", err)
+			utils.RespondWithError(writer, 404, errMsg)
+			return
+		}
+
+		writer.WriteHeader(http.StatusNoContent)
+
 	})
 }

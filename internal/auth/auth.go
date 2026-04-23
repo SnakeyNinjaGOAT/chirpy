@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -77,20 +78,30 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 }
 
 func GetBearerToken(headers http.Header) (string, error) {
+
+	return getAuthorizationToken(headers, "Bearer")
+}
+
+func GetApiKeyToken(headers http.Header) (string, error) {
+	return getAuthorizationToken(headers, "ApiKey")
+}
+
+func getAuthorizationToken(headers http.Header, tokenType string) (string, error) {
 	authHead := headers.Get("Authorization")
+	errMsg := fmt.Sprintf("%s token required", tokenType)
 
 	if authHead == "" || len(authHead) < 7 {
-		return "", errors.New("Bearer token required")
+		return "", errors.New(errMsg)
 	}
 
-	tokenString := strings.TrimPrefix(authHead, "Bearer ")
+	token := fmt.Sprintf("%s ", tokenType)
+	tokenString := strings.TrimPrefix(authHead, token)
 
 	if len(tokenString) == len(authHead) {
-		return "", errors.New("Bearer token required")
+		return "", errors.New(errMsg)
 	}
 
 	return tokenString, nil
-
 }
 
 func MakeRefreshToken() string {

@@ -11,3 +11,15 @@ SELECT * FROM users WHERE id = $1;
 
 -- name: GetUserByEmail :one
 SELECT * FROM users WHERE email = $1;
+
+-- name: UpdateUser :one
+UPDATE users
+SET updated_at = NOW(), email = $2, hashed_password = $3
+WHERE id = $1
+RETURNING *;
+
+
+-- name: UpgradeUserToChirpyRed :exec
+UPDATE users
+SET updated_at = NOW(), is_chirpy_red = TRUE
+WHERE id = $1;

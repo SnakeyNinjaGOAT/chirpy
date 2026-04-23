@@ -23,12 +23,16 @@ type DBInterface interface {
 	GetChirps(context.Context) ([]database.Chirp, error)
 	CreateRefreshToken(context.Context, database.CreateRefreshTokenParams) (database.RefreshToken, error)
 	DeleteAllUsers(context.Context) error
+	UpdateUser(context.Context, database.UpdateUserParams) (database.User, error)
+	DeleteChirp(context.Context, uuid.UUID) error
+	UpgradeUserToChirpyRed(context.Context, uuid.UUID) error
 }
 
 type ApiConfig struct {
 	FileserverHits atomic.Int32
 	Db             DBInterface
 	JwtSecret      string
+	PolkaKey       string
 }
 
 func LoadEnv() (ApiConfig, error) {
@@ -39,8 +43,8 @@ func LoadEnv() (ApiConfig, error) {
 	}
 
 	dbUrl := os.Getenv("DB_URL")
-	jwtSecret := os.Getenv("JWT_TOKEN")
-
+	jwtSecret := os.Getenv("JWT_SECRET")
+	polkaKey := os.Getenv("POLKA_KEY")
 	db, err := sql.Open("postgres", dbUrl)
 
 	if err != nil {
@@ -52,6 +56,7 @@ func LoadEnv() (ApiConfig, error) {
 	return ApiConfig{
 		Db:        dbQueries,
 		JwtSecret: jwtSecret,
+		PolkaKey:  polkaKey,
 	}, nil
 
 }

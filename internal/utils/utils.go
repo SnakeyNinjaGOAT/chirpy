@@ -79,10 +79,11 @@ func RespondWithJSON(writer http.ResponseWriter, code int, payload interface{}) 
 
 func ConvertUser(user database.User) models.User {
 	return models.User{
-		ID:        user.ID,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email,
+		ID:          user.ID,
+		CreatedAt:   user.CreatedAt,
+		UpdatedAt:   user.UpdatedAt,
+		Email:       user.Email,
+		IsChirpyRed: user.IsChirpyRed,
 	}
 }
 

@@ -1,38 +1,22 @@
 package main
 
 import (
-	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 
 	"github.com/SnakeyNinjaGOAT/chirpy/internal/config"
-	"github.com/SnakeyNinjaGOAT/chirpy/internal/database"
 	"github.com/SnakeyNinjaGOAT/chirpy/internal/handlers"
-	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
 func main() {
-	err := godotenv.Load()
-	if err != nil {
-		fmt.Println(err)
-	}
-	dbUrl := os.Getenv("DB_URL")
-	db, err := sql.Open("postgres", dbUrl)
-
-	dbQueries := database.New(db)
-
+	apiCfg, err := config.LoadEnv()
 	if err != nil {
 		fmt.Println(err)
 	}
 	mux := http.NewServeMux()
-
-	apiCfg := config.ApiConfig{}
-	apiCfg.Db = dbQueries
-
-	apiCfg.JwtSecret = os.Getenv("JWT_TOKEN")
 
 	if err != nil {
 		log.Printf("Error connecting to database: %s", err)
@@ -67,5 +51,12 @@ func setUpEndPoints(mux *http.ServeMux, apiCfg *config.ApiConfig) {
 	mux.HandleFunc("POST /api/users", handlers.HandlePostUsers(apiCfg))
 	mux.HandleFunc("POST /api/chirps", handlers.HandlePostChirp(apiCfg))
 	mux.HandleFunc("POST /api/login", handlers.HandleLogin(apiCfg))
+
+	mux.HandleFunc("PUT /api/users", handlers.HandleUpdateUser(apiCfg))
+
+	mux.HandleFunc("DELETE /api/chirps/{chirpId}", handlers.HandleDeleteChirp(apiCfg))
+
+	// Webhooks
+	mux.HandleFunc("POST /api/polka/webhooks", handlers.HandleChirpyRedUpgrade(apiCfg))
 
 }
